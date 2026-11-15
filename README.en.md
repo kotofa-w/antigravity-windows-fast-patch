@@ -103,15 +103,18 @@ The toolkit supports three lightweight collaboration paths without requiring ded
 
 ---
 
-## Upstream Acknowledgements
+## Upstream Projects & Acknowledgements
 
-This project builds upon work by the open-source community:
+This project builds upon valuable work and inspiration from the open-source community:
 
-1. **Proxy DLL Injection (version.dll & traffic interception)**:
-   - Upstream repository: [yuaotian/antigravity-proxy](https://github.com/yuaotian/antigravity-proxy)
-   - Special thanks to `yuaotian` for the Winsock DLL hijacking and traffic redirection implementation.
-2. **ASAR Packaging & Inspection**:
-   - Built with `@electron/asar` for high-performance extraction and repackaging with unpacked layout preservation.
+1. **Proxy DLL Injection (version.dll & Traffic Routing)**:
+   - Upstream: [yuaotian/antigravity-proxy](https://github.com/yuaotian/antigravity-proxy)
+   - Special thanks to `yuaotian` for the Windows Winsock DLL injection and local HTTP proxy routing implementation.
+2. **Maintenance Workflow Architecture & Agent Skill Paradigm**:
+   - Upstream: [chen0416ccc-cpu/codex-windows-fast-patch-skill](https://github.com/chen0416ccc-cpu/codex-windows-fast-patch-skill)
+   - Special thanks to `chen0416ccc-cpu` for pioneering automated health checks, snapshot-backed safe fixes, zero-downtime hot-patching, and standard agent skill workflow patterns.
+3. **ASAR Packaging & Inspection**:
+   - Built with the official `@electron/asar` library for robust repackaging and unpacked structure protection.
 
 ---
 

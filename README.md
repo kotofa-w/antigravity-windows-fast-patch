@@ -137,13 +137,16 @@ D:\Agent\Antigravity\环境修复\
 
 ## 开源依赖与上游致谢
 
-本项目由社区开发者共同构建，核心功能依赖以下优秀开源项目：
+本项目由社区共同构建，核心架构与关键能力得益于以下优秀开源项目的贡献与启发：
 
-1. **代理注入组件 (version.dll & 流量拦截)**：
+1. **网络代理注入组件 (version.dll 与子进程流量路由)**：
    - 上游仓库：[yuaotian/antigravity-proxy](https://github.com/yuaotian/antigravity-proxy)
-   - 感谢 `yuaotian` 提供的 Windows Winsock DLL 劫持与流量重定向实现。
-2. **ASAR 打包与离线解析引擎**：
-   - 基于 `@electron/asar` 官方库封装，实现了针对 Antigravity 资源包的高性能解包、修改注入与保留外置解包布局的二进制打包。
+   - 感谢 `yuaotian` 提供的 Windows Winsock DLL 注入方案与本地 HTTP 代理路由配置。
+2. **Windows 自动化维护工作流与 Agent 技能架构范式**：
+   - 上游仓库：[chen0416ccc-cpu/codex-windows-fast-patch-skill](https://github.com/chen0416ccc-cpu/codex-windows-fast-patch-skill)
+   - 感谢 `chen0416ccc-cpu` 在自动化体检、快照安全修复、零停机热修复机制以及标准 Agent Skill 工作流设计上带来的开创性启发。
+3. **ASAR 资源打包与解包引擎**：
+   - 基于官方 `@electron/asar` 库封装，保障了资源注入与外置目录结构保护的可靠性。
 
 ---
 
