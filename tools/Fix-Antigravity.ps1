@@ -7,7 +7,7 @@
 
 [CmdletBinding()]
 param (
-    [string]$AppDir = 'C:\Users\123\AppData\Local\Programs\antigravity',
+    [string]$AppDir = '',
     [string]$ProxySourceDir = '',
     [string]$ChineseTool = '',
     [string]$ExpectedDllHash = '40F037232A180DA8DFF7611021270549FCC4E208580D8BF0F70BC9975F871B5F',
@@ -21,7 +21,16 @@ param (
 
 $ErrorActionPreference = 'Stop'
 $toolsDir = $PSScriptRoot
+$projectRoot = Split-Path $toolsDir -Parent
 $nodeScript = Join-Path $toolsDir 'patch-asar.cjs'
+$discoveryScript = Join-Path $toolsDir 'EnvironmentDiscovery.ps1'
+$installSkillScript = Join-Path $toolsDir 'Install-AgentSkill.ps1'
+
+# 动态环境事实探测
+$envData = & $discoveryScript -AppDir $AppDir -PreferredProxyPort $ProxyPort
+if (-not $AppDir) {
+    $AppDir = $envData.Antigravity.AppDir
+}
 
 function Log-Section([string]$title) {
     if (-not $Quiet) {
@@ -42,25 +51,16 @@ function Log-Warn([string]$msg) {
 }
 
 # 0. 自包含环境路径智能解析
-$projectRoot = Split-Path $PSScriptRoot -Parent
 $payloadProxyDir = Join-Path $projectRoot 'payload\proxy'
 $payloadChineseCli = Join-Path $projectRoot 'payload\localization\cli.js'
 $defaultBackupDir = Join-Path $projectRoot 'outputs'
 
 if (-not $BackupBaseDir) {
-    if (Test-Path -LiteralPath $defaultBackupDir) {
-        $BackupBaseDir = $defaultBackupDir
-    } else {
-        $BackupBaseDir = 'C:\Users\123\Documents\Codex\2026-11-11\fang\outputs'
-    }
+    $BackupBaseDir = $defaultBackupDir
 }
 
 if (-not $ChineseTool) {
-    if (Test-Path -LiteralPath $payloadChineseCli) {
-        $ChineseTool = $payloadChineseCli
-    } else {
-        $ChineseTool = 'C:\Users\123\Downloads\antigravity-chinese-3.3.21\antigravity-chinese-3.3.21\cli.js'
-    }
+    $ChineseTool = $payloadChineseCli
 }
 
 # 1. 预检与判定需要修改的范围
@@ -154,8 +154,8 @@ $backupDir = Join-Path $BackupBaseDir "backup-$timestamp"
 New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
 $shortcuts = @(
-    'C:\Users\123\Desktop\Antigravity.lnk',
-    'C:\Users\123\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Antigravity.lnk'
+    $envData.Shortcuts.Desktop,
+    $envData.Shortcuts.StartMenu
 )
 $shell = New-Object -ComObject WScript.Shell
 $shortcutBackups = @()
@@ -244,7 +244,10 @@ if (-not $SkipLocalization) {
         $asarPatched = $true
     } else {
         Log-Warn "当前 app.asar 未汉化，正在启动隔离沙箱进行精准合成与注入..."
-        $stagingDir = 'C:\Users\123\Documents\Codex\2026-11-11\fang\work\asar-staging'
+        $stagingDir = Join-Path $projectRoot 'outputs\asar-staging'
+        if (-not (Test-Path -LiteralPath $stagingDir)) {
+            New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+        }
         $outputPreserved = Join-Path $stagingDir 'app-preserved.asar'
 
         $buildArgs = @(
@@ -287,24 +290,13 @@ foreach ($rel in $protectedFiles) {
     Log-Success "受保护文件完整未变: $rel"
 }
 
-# 8. 同步智能体中文交互插件与全局规则配置
-Log-Section "8. 智能体中文插件与全局规则同步"
-$userProfile = [System.Environment]::GetFolderPath('UserProfile')
-$targetPluginDir = Join-Path $userProfile '.gemini\config\plugins\chinese-toolkit'
-$pluginSourceDir = $null
+# 8. 同步智能体中文交互插件、全局规则与 Agent Skill
+Log-Section "8. 智能体中文插件、全局规则与 Skill 部署"
+$userProfile = $envData.OS.UserProfile
+$targetPluginDir = $envData.Agent.ChineseToolkitDir
+$pluginSourceDir = Join-Path $projectRoot 'payload\plugins\chinese-toolkit'
 
-$candidatePluginSources = @(
-    (Join-Path $PSScriptRoot '..\payload\plugins\chinese-toolkit'),
-    (Join-Path $PSScriptRoot '..\work\ag-chinese\plugins\chinese-toolkit')
-)
-foreach ($cand in $candidatePluginSources) {
-    if (Test-Path -LiteralPath (Join-Path $cand 'plugin.json')) {
-        $pluginSourceDir = $cand
-        break
-    }
-}
-
-if ($pluginSourceDir) {
+if (Test-Path -LiteralPath (Join-Path $pluginSourceDir 'plugin.json')) {
     if (-not (Test-Path -LiteralPath $targetPluginDir)) {
         New-Item -ItemType Directory -Path $targetPluginDir -Force | Out-Null
     }
@@ -314,13 +306,27 @@ if ($pluginSourceDir) {
     Log-Warn "未找到插件源目录，跳过 chinese-toolkit 安装"
 }
 
-$codexAgents = Join-Path $userProfile '.codex\AGENTS.md'
-$geminiRulesAgents = Join-Path $userProfile '.gemini\config\rules\AGENTS.md'
-$geminiConfigAgents = Join-Path $userProfile '.gemini\config\AGENTS.md'
-if (Test-Path -LiteralPath $codexAgents) {
-    Copy-Item -Path $codexAgents -Destination $geminiRulesAgents -Force
-    Copy-Item -Path $codexAgents -Destination $geminiConfigAgents -Force
-    Log-Success "全局规则 AGENTS.md 已与权威真源 (.codex\AGENTS.md) 保持最新同步"
+# 规则同步：优先使用权威源 (.codex\AGENTS.md 或本项目 AGENTS.md)
+$userCodexAgents = Join-Path $userProfile '.codex\AGENTS.md'
+$projectAgents = Join-Path $projectRoot 'AGENTS.md'
+$authoritativeSource = if (Test-Path -LiteralPath $userCodexAgents) { $userCodexAgents } else { $projectAgents }
+
+$geminiRulesAgents = $envData.Agent.RulesFile
+$geminiConfigAgents = Join-Path $envData.Agent.ConfigDir 'AGENTS.md'
+if (Test-Path -LiteralPath $authoritativeSource) {
+    $rulesDir = Split-Path -Parent $geminiRulesAgents
+    if (-not (Test-Path -LiteralPath $rulesDir)) { New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null }
+    Copy-Item -Path $authoritativeSource -Destination $geminiRulesAgents -Force
+    Copy-Item -Path $authoritativeSource -Destination $geminiConfigAgents -Force
+    Log-Success "全局规则 AGENTS.md 已同步权威基准 ($authoritativeSource)"
+}
+
+# 自动注册/更新 Agent Skill
+try {
+    & $installSkillScript -Quiet
+    Log-Success "Agent Skill (antigravity-windows-fast-patch) 已自动同步注册至全局技能库。"
+} catch {
+    Log-Warn "自动注册 Agent Skill 提示: $($_.Exception.Message)"
 }
 
 $geminiCfgPath = Join-Path $userProfile '.gemini\config\config.json'

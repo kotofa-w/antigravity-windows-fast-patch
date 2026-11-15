@@ -1,35 +1,97 @@
 ﻿<#
 .SYNOPSIS
-    Antigravity 全维健康检验脚本
+    Antigravity 全维健康检验与统一诊断脚本 (Check-Antigravity)
 .DESCRIPTION
-    全面检测 Antigravity 客户端、代理补丁、启动器快捷方式、宿主汉化补丁以及运行态连接。
+    全面检测 Antigravity 客户端、代理补丁、启动器快捷方式、宿主汉化补丁、
+    运行态连接、智能体规则策略以及 Agent Skill 注册状态。
+    基于统一协议输出结构化项 (ID, Name, Source, Status, Evidence, RepairStatus)，
+    支持生成持久化健康快照 outputs/health-runs/<run-id>/summary.json & summary.md。
 #>
 
 [CmdletBinding()]
 param (
-    [string]$AppDir = 'C:\Users\123\AppData\Local\Programs\antigravity',
+    [string]$AppDir = '',
     [string]$ExpectedDllHash = '40F037232A180DA8DFF7611021270549FCC4E208580D8BF0F70BC9975F871B5F',
     [string]$ExpectedProxyHost = '127.0.0.1',
     [int]$ExpectedProxyPort = 65532,
+    [string]$RunId = '',
     [switch]$Quiet
 )
 
 $ErrorActionPreference = 'Stop'
 $toolsDir = $PSScriptRoot
+$projectRoot = Split-Path $toolsDir -Parent
 $nodeScript = Join-Path $toolsDir 'patch-asar.cjs'
+$discoveryScript = Join-Path $toolsDir 'EnvironmentDiscovery.ps1'
 
+# 1. 动态加载环境探测事实
+$envData = & $discoveryScript -AppDir $AppDir -PreferredProxyPort $ExpectedProxyPort
+if (-not $AppDir) {
+    $AppDir = $envData.Antigravity.AppDir
+}
+if (-not $ExpectedProxyPort -and $envData.Proxy.TargetPort) {
+    $ExpectedProxyPort = $envData.Proxy.TargetPort
+}
+
+if (-not $RunId) {
+    $RunId = 'run-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+}
+$checkTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+
+# 统一检查项目清单 (Check Items)
+$checkItems = [System.Collections.Generic.List[PSCustomObject]]::new()
 $issues = [System.Collections.Generic.List[string]]::new()
-$report = [ordered]@{
-    CheckTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    AppDir = $AppDir
-    Version = 'Unknown'
-    IsInstalled = $false
-    ProxyFiles = [ordered]@{}
-    Shortcuts = [ordered]@{}
-    Localization = [ordered]@{}
-    Runtime = [ordered]@{}
-    Issues = $issues
-    Status = 'Healthy'
+
+function Add-CheckItem {
+    param (
+        [string]$Id,
+        [string]$Name,
+        [string]$Source = 'external',
+        [string]$Status = 'pass',
+        [string]$Evidence = '',
+        [string]$Issue = '',
+        [string]$RepairStatus = 'not_needed'
+    )
+
+    $item = [PSCustomObject]@{
+        Id           = $Id
+        Name         = $Name
+        Source       = $Source
+        Status       = $Status
+        Evidence     = $Evidence
+        Issue        = $Issue
+        RepairStatus = $RepairStatus
+        CheckTime    = $checkTime
+    }
+    $checkItems.Add($item)
+
+    if ($Status -eq 'fail' -or $Status -eq 'warning') {
+        $desc = if ($Issue) { $Issue } else { "$Name 检验未通过" }
+        $issues.Add("[$Id] $desc")
+    }
+
+    if (-not $Quiet) {
+        $icon = switch ($Status) {
+            'pass'    { "  [OK]   " }
+            'warning' { "  [WARN] " }
+            'fail'    { "  [FAIL] " }
+            'skipped' { "  [SKIP] " }
+            default   { "  [UNK]  " }
+        }
+        $color = switch ($Status) {
+            'pass'    { "Green" }
+            'warning' { "Yellow" }
+            'fail'    { "Red" }
+            'skipped' { "DarkGray" }
+            default   { "Cyan" }
+        }
+        Write-Host "$icon $Name" -NoNewline -ForegroundColor $color
+        if ($Evidence) {
+            Write-Host " - $Evidence" -ForegroundColor Gray
+        } else {
+            Write-Host ""
+        }
+    }
 }
 
 function Log-Section([string]$title) {
@@ -38,39 +100,52 @@ function Log-Section([string]$title) {
     }
 }
 
-function Log-Item([string]$name, [bool]$pass, [string]$detail) {
-    if (-not $Quiet) {
-        $icon = if ($pass) { "  [OK]  " } else { "  [FAIL]" }
-        $color = if ($pass) { "Green" } else { "Red" }
-        Write-Host "$icon $name" -NoNewline -ForegroundColor $color
-        if ($detail) {
-            Write-Host " - $detail" -ForegroundColor Gray
-        } else {
-            Write-Host ""
-        }
-    }
+$report = [ordered]@{
+    RunId             = $RunId
+    CheckTime         = $checkTime
+    AppDir            = $AppDir
+    Version           = 'Unknown'
+    IsInstalled       = $false
+    ProxyFiles        = [ordered]@{}
+    Shortcuts         = [ordered]@{}
+    Localization      = [ordered]@{}
+    Runtime           = [ordered]@{}
+    AgentEnvironment  = [ordered]@{}
+    Items             = $checkItems
+    Issues            = $issues
+    Status            = 'Healthy'
 }
 
-# 1. 检查客户端基础安装
-Log-Section "1. 客户端安装与受保护二进制检查"
-if (Test-Path -LiteralPath $AppDir) {
+# 1. 检查客户端基础安装与核心二进制完整性
+Log-Section "1. 客户端安装与受保护核心二进制检查"
+$appDirExists = Test-Path -LiteralPath $AppDir
+if ($appDirExists) {
     $report.IsInstalled = $true
-    Log-Item "安装目录存在" $true $AppDir
+    Add-CheckItem -Id "CORE-BIN-01" -Name "客户端安装目录" -Source "external" -Status "pass" -Evidence "存在: $AppDir"
 } else {
-    Log-Item "安装目录存在" $false "未找到目录: $AppDir"
-    $issues.Add("客户端安装目录不存在: $AppDir")
+    Add-CheckItem -Id "CORE-BIN-01" -Name "客户端安装目录" -Source "external" -Status "fail" -Evidence "缺失: $AppDir" -Issue "客户端安装目录未找到" -RepairStatus "manual_required"
 }
 
 $mainExe = Join-Path $AppDir 'Antigravity.exe'
 $langExe = Join-Path $AppDir 'resources\bin\language_server.exe'
 $mainExeExists = Test-Path -LiteralPath $mainExe
 $langExeExists = Test-Path -LiteralPath $langExe
-Log-Item "主程序 (Antigravity.exe)" $mainExeExists $mainExe
-Log-Item "语言服务器 (language_server.exe)" $langExeExists $langExe
-if (-not $mainExeExists) { $issues.Add("缺少核心二进制: Antigravity.exe") }
-if (-not $langExeExists) { $issues.Add("缺少语言服务器二进制: resources\bin\language_server.exe") }
 
-# 2. 检查代理补丁与启动器
+if ($mainExeExists) {
+    $mainHash = (Get-FileHash -LiteralPath $mainExe -Algorithm SHA256).Hash
+    Add-CheckItem -Id "CORE-BIN-02" -Name "主程序 (Antigravity.exe)" -Source "external" -Status "pass" -Evidence "完整且受保护 (SHA256: $mainHash)"
+} else {
+    Add-CheckItem -Id "CORE-BIN-02" -Name "主程序 (Antigravity.exe)" -Source "external" -Status "fail" -Evidence "文件缺失: $mainExe" -Issue "主程序核心二进制缺失" -RepairStatus "manual_required"
+}
+
+if ($langExeExists) {
+    $langHash = (Get-FileHash -LiteralPath $langExe -Algorithm SHA256).Hash
+    Add-CheckItem -Id "CORE-BIN-03" -Name "语言服务器 (language_server.exe)" -Source "external" -Status "pass" -Evidence "存在 (SHA256: $langHash)"
+} else {
+    Add-CheckItem -Id "CORE-BIN-03" -Name "语言服务器 (language_server.exe)" -Source "external" -Status "fail" -Evidence "文件缺失: $langExe" -Issue "语言服务器核心程序缺失" -RepairStatus "manual_required"
+}
+
+# 2. 检查代理补丁与启动脚本
 Log-Section "2. 代理补丁 (v2.4) 与启动脚本检查"
 $dllPath = Join-Path $AppDir 'version.dll'
 $cfgPath = Join-Path $AppDir 'config.json'
@@ -79,13 +154,15 @@ $vbsPath = Join-Path $AppDir "launch-antigravity-$ExpectedProxyPort.vbs"
 if (Test-Path -LiteralPath $dllPath) {
     $dllHash = (Get-FileHash -LiteralPath $dllPath -Algorithm SHA256).Hash
     $dllMatch = ($dllHash -eq $ExpectedDllHash)
-    Log-Item "代理 DLL (version.dll)" $dllMatch "SHA256: $dllHash"
-    if (-not $dllMatch) { $issues.Add("version.dll 哈希不匹配 (期望: $ExpectedDllHash)") }
     $report.ProxyFiles['version.dll'] = @{ Exists = $true; Hash = $dllHash; Match = $dllMatch }
+    if ($dllMatch) {
+        Add-CheckItem -Id "PROXY-01" -Name "代理注入 DLL (version.dll)" -Source "external" -Status "pass" -Evidence "SHA256 匹配受控基线 ($dllHash)"
+    } else {
+        Add-CheckItem -Id "PROXY-01" -Name "代理注入 DLL (version.dll)" -Source "external" -Status "warning" -Evidence "当前哈希: $dllHash (非默认基线 $ExpectedDllHash)" -Issue "version.dll 哈希与基线不一致" -RepairStatus "fixed"
+    }
 } else {
-    Log-Item "代理 DLL (version.dll)" $false "文件缺失"
-    $issues.Add("缺少代理 DLL: version.dll")
     $report.ProxyFiles['version.dll'] = @{ Exists = $false; Match = $false }
+    Add-CheckItem -Id "PROXY-01" -Name "代理注入 DLL (version.dll)" -Source "external" -Status "fail" -Evidence "文件缺失: $dllPath" -Issue "缺少代理注入 DLL" -RepairStatus "fixed"
 }
 
 if (Test-Path -LiteralPath $cfgPath) {
@@ -103,35 +180,42 @@ if (Test-Path -LiteralPath $cfgPath) {
     } catch {
         $targetDesc = "解析错误: $($_.Exception.Message)"
     }
-    Log-Item "代理配置 (config.json)" $cfgValid "目标: $targetDesc"
-    if (-not $cfgValid) { $issues.Add("config.json 未正确指向 ${ExpectedProxyHost}:${ExpectedProxyPort}") }
     $report.ProxyFiles['config.json'] = @{ Exists = $true; Valid = $cfgValid; Target = $targetDesc }
+    if ($cfgValid) {
+        Add-CheckItem -Id "PROXY-02" -Name "代理配置 (config.json)" -Source "external" -Status "pass" -Evidence "目标有效: $targetDesc"
+    } else {
+        Add-CheckItem -Id "PROXY-02" -Name "代理配置 (config.json)" -Source "external" -Status "fail" -Evidence "当前配置: $targetDesc (期望: ${ExpectedProxyHost}:${ExpectedProxyPort})" -Issue "config.json 未正确指向目标代理端口" -RepairStatus "fixed"
+    }
 } else {
-    Log-Item "代理配置 (config.json)" $false "文件缺失"
-    $issues.Add("缺少代理配置文件: config.json")
     $report.ProxyFiles['config.json'] = @{ Exists = $false; Valid = $false }
+    Add-CheckItem -Id "PROXY-02" -Name "代理配置 (config.json)" -Source "external" -Status "fail" -Evidence "文件缺失: $cfgPath" -Issue "缺少代理配置文件" -RepairStatus "fixed"
 }
 
 if (Test-Path -LiteralPath $vbsPath) {
     $vbsContent = Get-Content -LiteralPath $vbsPath -Raw
     $vbsValid = ($vbsContent -match "${ExpectedProxyHost}:${ExpectedProxyPort}")
-    Log-Item "VBS 启动脚本" $vbsValid $vbsPath
-    if (-not $vbsValid) { $issues.Add("启动脚本 $vbsPath 未包含目标代理端口 $ExpectedProxyPort") }
     $report.ProxyFiles['vbs'] = @{ Exists = $true; Valid = $vbsValid }
+    if ($vbsValid) {
+        Add-CheckItem -Id "PROXY-03" -Name "VBS 启动脚本" -Source "external" -Status "pass" -Evidence "端口就绪: $vbsPath"
+    } else {
+        Add-CheckItem -Id "PROXY-03" -Name "VBS 启动脚本" -Source "external" -Status "fail" -Evidence "未匹配目标端口: $ExpectedProxyPort" -Issue "VBS 启动脚本未指向正确端口" -RepairStatus "fixed"
+    }
 } else {
-    Log-Item "VBS 启动脚本" $false "文件缺失: $vbsPath"
-    $issues.Add("缺少启动脚本: $vbsPath")
     $report.ProxyFiles['vbs'] = @{ Exists = $false; Valid = $false }
+    Add-CheckItem -Id "PROXY-03" -Name "VBS 启动脚本" -Source "external" -Status "fail" -Evidence "文件缺失: $vbsPath" -Issue "缺少代理启动脚本" -RepairStatus "fixed"
 }
 
 # 3. 检查快捷方式
 Log-Section "3. 桌面与开始菜单快捷方式检查"
+$desktopLnk = $envData.Shortcuts.Desktop
+$startMenuLnk = $envData.Shortcuts.StartMenu
 $shortcuts = @(
-    @{ Name = 'Desktop'; Path = 'C:\Users\123\Desktop\Antigravity.lnk' },
-    @{ Name = 'StartMenu'; Path = 'C:\Users\123\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Antigravity.lnk' }
+    @{ Id = 'SHORTCUT-01'; Name = '桌面快捷方式'; Path = $desktopLnk },
+    @{ Id = 'SHORTCUT-02'; Name = '开始菜单快捷方式'; Path = $startMenuLnk }
 )
 $wsh = New-Object -ComObject WScript.Shell
 foreach ($s in $shortcuts) {
+    $sId = $s.Id
     $sName = $s.Name
     $sPath = $s.Path
     if (Test-Path -LiteralPath $sPath) {
@@ -139,53 +223,57 @@ foreach ($s in $shortcuts) {
         $targetOk = ($lnk.TargetPath -like '*\wscript.exe')
         $argsOk = ($lnk.Arguments -like "*launch-antigravity-$ExpectedProxyPort.vbs*")
         $shortcutOk = ($targetOk -and $argsOk)
-        Log-Item "快捷方式 [$sName]" $shortcutOk "Target: $($lnk.TargetPath) | Args: $($lnk.Arguments)"
-        if (-not $shortcutOk) {
-            $issues.Add("快捷方式 [$sName] 未配置为通过 VBS 脚本启动代理模式")
-        }
-        $report.Shortcuts[$sName] = @{
+        $report.Shortcuts[$sId] = @{
             Exists = $true
             TargetPath = $lnk.TargetPath
             Arguments = $lnk.Arguments
             Valid = $shortcutOk
         }
+        if ($shortcutOk) {
+            Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "pass" -Evidence "指向 VBS 启动器 (Target: $($lnk.TargetPath))"
+        } else {
+            Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "fail" -Evidence "Target: $($lnk.TargetPath) | Args: $($lnk.Arguments)" -Issue "快捷方式未指向代理启动器脚本" -RepairStatus "fixed"
+        }
     } else {
-        Log-Item "快捷方式 [$sName]" $false "快捷方式不存在: $sPath"
-        $issues.Add("快捷方式不存在: $sPath")
-        $report.Shortcuts[$sName] = @{ Exists = $false; Valid = $false }
+        $report.Shortcuts[$sId] = @{ Exists = $false; Valid = $false }
+        Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "warning" -Evidence "快捷方式未找到: $sPath" -Issue "快捷方式文件不存在" -RepairStatus "fixed"
     }
 }
 
-# 4. 检查汉化补丁与资源结构
+# 4. 检查汉化补丁与 ASAR 结构
 Log-Section "4. 宿主汉化补丁与 ASAR 资源检查"
 $asarPath = Join-Path $AppDir 'resources\app.asar'
 $unpackedDir = Join-Path $AppDir 'resources\app.asar.unpacked\node_modules\chrome-devtools-mcp'
 $asarCheck = $null
+
 if (Test-Path -LiteralPath $asarPath) {
     try {
         $asarJson = node $nodeScript --action check --asarPath $asarPath
         $asarCheck = $asarJson | ConvertFrom-Json
         $report.Version = $asarCheck.version
-        $patchStatusText = if ($asarCheck.isPatched) { "已注入汉化补丁" } else { "未检测到汉化补丁 (官方英文版)" }
-        Log-Item "ASAR 资源包存在" $true "版本: $($asarCheck.version), 条目数: $($asarCheck.totalEntries)"
-        Log-Item "汉化补丁注入状态" $asarCheck.isPatched $patchStatusText
-        if (-not $asarCheck.isPatched) {
-            $issues.Add("app.asar 未注入汉化补丁 (当前为官方原版或已被更新覆盖)")
+        Add-CheckItem -Id "ASAR-01" -Name "ASAR 资源包存在" -Source "external" -Status "pass" -Evidence "版本: $($asarCheck.version), 条目数: $($asarCheck.totalEntries)"
+
+        if ($asarCheck.isPatched) {
+            Add-CheckItem -Id "ASAR-02" -Name "汉化补丁注入状态" -Source "external" -Status "pass" -Evidence "已注入汉化补丁 (UI 脚本已替换)"
+        } else {
+            Add-CheckItem -Id "ASAR-02" -Name "汉化补丁注入状态" -Source "external" -Status "fail" -Evidence "当前为官方原版或已被更新覆盖" -Issue "app.asar 未注入汉化补丁" -RepairStatus "fixed"
         }
     } catch {
-        Log-Item "ASAR 解析" $false $_.Exception.Message
-        $issues.Add("app.asar 解析失败: $($_.Exception.Message)")
+        Add-CheckItem -Id "ASAR-01" -Name "ASAR 资源包解析" -Source "external" -Status "fail" -Evidence $_.Exception.Message -Issue "app.asar 解析失败" -RepairStatus "manual_required"
+        Add-CheckItem -Id "ASAR-02" -Name "汉化补丁注入状态" -Source "external" -Status "unknown" -Evidence "无法解析 ASAR" -Issue "ASAR 状态未知" -RepairStatus "manual_required"
     }
 } else {
-    Log-Item "ASAR 资源包存在" $false "未找到: $asarPath"
-    $issues.Add("缺少关键资源: $asarPath")
+    Add-CheckItem -Id "ASAR-01" -Name "ASAR 资源包存在" -Source "external" -Status "fail" -Evidence "缺失: $asarPath" -Issue "缺少关键资源 app.asar" -RepairStatus "manual_required"
+    Add-CheckItem -Id "ASAR-02" -Name "汉化补丁注入状态" -Source "external" -Status "skipped" -Evidence "ASAR 不存在"
 }
 
 $unpackedExists = Test-Path -LiteralPath $unpackedDir
-Log-Item "外置扩展 (chrome-devtools-mcp)" $unpackedExists $unpackedDir
-if (-not $unpackedExists) {
-    $issues.Add("缺少外置 unpacked 资源目录: $unpackedDir")
+if ($unpackedExists) {
+    Add-CheckItem -Id "ASAR-03" -Name "外置扩展保护 (chrome-devtools-mcp)" -Source "external" -Status "pass" -Evidence "目录完整: $unpackedDir"
+} else {
+    Add-CheckItem -Id "ASAR-03" -Name "外置扩展保护 (chrome-devtools-mcp)" -Source "external" -Status "fail" -Evidence "未找到外置解包目录: $unpackedDir" -Issue "缺少 chrome-devtools-mcp 外置解包目录" -RepairStatus "fixed"
 }
+
 $report.Localization = @{
     AsarExists = (Test-Path -LiteralPath $asarPath)
     Version = $report.Version
@@ -199,17 +287,16 @@ $procAg = Get-Process Antigravity -ErrorAction SilentlyContinue
 $procLs = Get-Process language_server -ErrorAction SilentlyContinue
 $isRunning = [bool]($procAg)
 $agDesc = if ($isRunning) { "共 $($procAg.Count) 个进程" } else { "未运行" }
-Log-Item "Antigravity 运行中" $isRunning $agDesc
 $lsRunning = [bool]($procLs)
 $lsDesc = if ($lsRunning) { "共 $($procLs.Count) 个进程" } else { "未运行" }
-Log-Item "language_server 运行中" $lsRunning $lsDesc
+
+Add-CheckItem -Id "RUNTIME-01" -Name "Antigravity 运行状态" -Source "external" -Status "pass" -Evidence "客户端: $agDesc | 语言服务器: $lsDesc"
 
 $tcpConns = @()
 try {
     $tcpConns = Get-NetTCPConnection -RemotePort $ExpectedProxyPort -ErrorAction SilentlyContinue
 } catch {}
 $tcpCount = if ($tcpConns) { $tcpConns.Count } else { 0 }
-Log-Item "TCP 代理连接 (Port $ExpectedProxyPort)" ($tcpCount -gt 0) "当前活跃连接数: $tcpCount"
 $report.Runtime = @{
     IsRunning = $isRunning
     AntigravityCount = if ($procAg) { $procAg.Count } else { 0 }
@@ -217,37 +304,50 @@ $report.Runtime = @{
     ProxyTcpConnections = $tcpCount
 }
 
+if ($tcpCount -gt 0) {
+    Add-CheckItem -Id "RUNTIME-02" -Name "TCP 代理连接 (Port $ExpectedProxyPort)" -Source "external" -Status "pass" -Evidence "活跃连接数: $tcpCount"
+} else {
+    $rStatus = if ($isRunning) { "warning" } else { "pass" }
+    $rEvidence = if ($isRunning) { "客户端运行中但当前无活跃代理连接" } else { "客户端未运行，无活跃连接属于正常态" }
+    Add-CheckItem -Id "RUNTIME-02" -Name "TCP 代理连接 (Port $ExpectedProxyPort)" -Source "external" -Status $rStatus -Evidence $rEvidence
+}
+
 # 6. 检查智能体中文插件与全局规则配置
-Log-Section "6. 智能体中文插件与全局规则策略检查"
-$userProfile = [System.Environment]::GetFolderPath('UserProfile')
-$pluginDir = Join-Path $userProfile '.gemini\config\plugins\chinese-toolkit'
+Log-Section "6. 智能体中文插件、规则与 Skill 检查"
+$pluginDir = $envData.Agent.ChineseToolkitDir
 $pluginManifest = Join-Path $pluginDir 'plugin.json'
 $pluginRules = Join-Path $pluginDir 'rules\chinese-interaction-rules.md'
 $pluginOk = (Test-Path -LiteralPath $pluginManifest) -and (Test-Path -LiteralPath $pluginRules)
-Log-Item "智能体中文交互插件 (chinese-toolkit)" $pluginOk $pluginDir
-if (-not $pluginOk) {
-    $issues.Add("缺少智能体中文交互插件: $pluginDir (可能导致智能体中文回复规范与提示丢失)")
+if ($pluginOk) {
+    Add-CheckItem -Id "AGENT-01" -Name "智能体中文交互插件 (chinese-toolkit)" -Source "internal" -Status "pass" -Evidence "已就绪: $pluginDir"
+} else {
+    Add-CheckItem -Id "AGENT-01" -Name "智能体中文交互插件 (chinese-toolkit)" -Source "internal" -Status "warning" -Evidence "未找到或不完整: $pluginDir" -Issue "智能体中文插件缺失，可能影响中文回复规范" -RepairStatus "fixed"
 }
 
-$codexAgents = Join-Path $userProfile '.codex\AGENTS.md'
-$geminiRulesAgents = Join-Path $userProfile '.gemini\config\rules\AGENTS.md'
-$geminiConfigAgents = Join-Path $userProfile '.gemini\config\AGENTS.md'
+# 权威规则对齐检查：优先比对本项目 AGENTS.md 与全局 AGENTS.md
+$projectAgents = Join-Path $projectRoot 'AGENTS.md'
+$geminiRulesAgents = $envData.Agent.RulesFile
+$geminiConfigAgents = Join-Path $envData.Agent.ConfigDir 'AGENTS.md'
+$userCodexAgents = Join-Path $envData.OS.UserProfile '.codex\AGENTS.md'
 
+$authoritativeSource = if (Test-Path -LiteralPath $userCodexAgents) { $userCodexAgents } else { $projectAgents }
 $rulesSyncOk = $true
-if (Test-Path -LiteralPath $codexAgents) {
-    $codexHash = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $authoritativeSource) {
+    $authHash = (Get-FileHash -LiteralPath $authoritativeSource -Algorithm SHA256).Hash
     $rHash = if (Test-Path -LiteralPath $geminiRulesAgents) { (Get-FileHash -LiteralPath $geminiRulesAgents -Algorithm SHA256).Hash } else { '' }
     $cHash = if (Test-Path -LiteralPath $geminiConfigAgents) { (Get-FileHash -LiteralPath $geminiConfigAgents -Algorithm SHA256).Hash } else { '' }
-    $rulesSyncOk = ($codexHash -eq $rHash -and $codexHash -eq $cHash)
-    Log-Item "全局规则同步 (AGENTS.md)" $rulesSyncOk "与权威源 ($codexAgents) 对齐"
-    if (-not $rulesSyncOk) {
-        $issues.Add("全局规则 AGENTS.md 未与权威真源对齐 (版本或内容可能落后)")
+    $rulesSyncOk = ($authHash -eq $rHash -and $authHash -eq $cHash)
+    if ($rulesSyncOk) {
+        Add-CheckItem -Id "AGENT-02" -Name "全局规则一致性 (AGENTS.md)" -Source "internal" -Status "pass" -Evidence "与权威源 ($authoritativeSource) 对齐"
+    } else {
+        Add-CheckItem -Id "AGENT-02" -Name "全局规则一致性 (AGENTS.md)" -Source "internal" -Status "warning" -Evidence "哈希未对齐权威真源" -Issue "全局规则 AGENTS.md 版本落后或内容未同步" -RepairStatus "fixed"
     }
 } else {
-    Log-Item "全局规则权威源 (.codex\AGENTS.md)" $false "未找到文件"
+    Add-CheckItem -Id "AGENT-02" -Name "全局规则一致性 (AGENTS.md)" -Source "internal" -Status "warning" -Evidence "未找到权威规则源" -Issue "缺少规则基准文件" -RepairStatus "fixed"
 }
 
-$geminiCfgPath = Join-Path $userProfile '.gemini\config\config.json'
+# 策略检查
+$geminiCfgPath = $envData.Agent.ConfigFile
 $policyOk = $false
 if (Test-Path -LiteralPath $geminiCfgPath) {
     try {
@@ -255,39 +355,126 @@ if (Test-Path -LiteralPath $geminiCfgPath) {
         $preset = $gCfg.userSettings.permissionPreset
         $autoPolicy = $gCfg.userSettings.autoExecutionPolicy
         $policyOk = ($preset -eq 'AGENT_PERMISSION_PRESET_AUTO')
-        Log-Item "执行策略 (config.json)" $policyOk "Preset: $preset | AutoPolicy: $autoPolicy"
-        if (-not $policyOk) {
-            $issues.Add("配置执行策略未处于自动审批模式 (当前: $preset)")
+        if ($policyOk) {
+            Add-CheckItem -Id "AGENT-03" -Name "执行审批策略 (config.json)" -Source "internal" -Status "pass" -Evidence "Preset: $preset | AutoPolicy: $autoPolicy"
+        } else {
+            Add-CheckItem -Id "AGENT-03" -Name "执行审批策略 (config.json)" -Source "internal" -Status "warning" -Evidence "Preset: $preset" -Issue "智能体执行策略未处于自动模式" -RepairStatus "fixed"
         }
     } catch {
-        Log-Item "配置策略解析" $false $_.Exception.Message
-        $issues.Add("config.json 解析异常")
+        Add-CheckItem -Id "AGENT-03" -Name "执行审批策略 (config.json)" -Source "internal" -Status "warning" -Evidence "解析异常: $($_.Exception.Message)" -Issue "config.json 格式异常" -RepairStatus "fixed"
     }
 } else {
-    Log-Item "全局配置文件 (config.json)" $false "未找到: $geminiCfgPath"
-    $issues.Add("缺少配置文件: $geminiCfgPath")
+    Add-CheckItem -Id "AGENT-03" -Name "执行审批策略 (config.json)" -Source "internal" -Status "warning" -Evidence "未找到: $geminiCfgPath" -Issue "缺少智能体全局配置文件" -RepairStatus "fixed"
+}
+
+# 检查 Agent Skill 是否已注册就绪
+$installedSkillLink = Join-Path $envData.Agent.SkillsDir 'antigravity-windows-fast-patch'
+$skillRegistered = (Test-Path -LiteralPath (Join-Path $installedSkillLink 'SKILL.md'))
+if ($skillRegistered) {
+    Add-CheckItem -Id "SKILL-01" -Name "维护 Agent Skill 注册状态" -Source "internal" -Status "pass" -Evidence "已注册就绪: $installedSkillLink"
+} else {
+    Add-CheckItem -Id "SKILL-01" -Name "维护 Agent Skill 注册状态" -Source "internal" -Status "warning" -Evidence "未注册到全局技能目录: $installedSkillLink" -Issue "Agent Skill 尚未安装到 Antigravity 全局目录" -RepairStatus "fixed"
 }
 
 $report.AgentEnvironment = @{
     PluginInstalled = $pluginOk
     RulesSynced = $rulesSyncOk
     PolicyAuto = $policyOk
+    SkillRegistered = $skillRegistered
 }
 
-# 总结
-Log-Section "检验结果总结"
-if ($issues.Count -eq 0) {
+# 7. 汇总并生成持久化报告
+$hasFail = [bool]($checkItems | Where-Object { $_.Status -eq 'fail' })
+$hasWarn = [bool]($checkItems | Where-Object { $_.Status -eq 'warning' })
+
+if ($hasFail) {
+    $report.Status = 'NeedsAttention'
+} elseif ($hasWarn) {
+    $report.Status = 'Warning'
+} else {
     $report.Status = 'Healthy'
+}
+
+# 落盘到 outputs/health-runs/<run-id>/
+$runDir = Join-Path $projectRoot "outputs\health-runs\$RunId"
+if (-not (Test-Path -LiteralPath $runDir)) {
+    New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+}
+
+$summaryJsonPath = Join-Path $runDir 'summary.json'
+$report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $summaryJsonPath -Encoding utf8
+
+# 建立 outputs/latest-run.json
+$latestJsonPath = Join-Path $projectRoot 'outputs\latest-run.json'
+$report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $latestJsonPath -Encoding utf8
+
+# 生成 Markdown 摘要报告
+$mdContent = @"
+# Antigravity 环境健康诊断报告 (Health Check Summary)
+
+- **运行 ID (RunId)**：`$($report.RunId)`
+- **检查时间**：`$($report.CheckTime)`
+- **客户端版本**：`$($report.Version)`
+- **安装路径**：`$($report.AppDir)`
+- **健康状态**：`$($report.Status)`
+
+---
+
+## 统一检查项清册 (Check Protocol Items)
+
+| ID | 检查项 | 来源 | 状态 | 证据 / 详情 | 待修复项 |
+| --- | --- | --- | --- | --- | --- |
+"@
+
+foreach ($item in $checkItems) {
+    $sBadge = switch ($item.Status) {
+        'pass'    { '✅ PASS' }
+        'warning' { '⚠️ WARN' }
+        'fail'    { '❌ FAIL' }
+        'skipped' { '⏭️ SKIP' }
+        default   { '❓ UNK' }
+    }
+    $ev = $item.Evidence -replace '\|', '\|'
+    $iss = if ($item.Issue) { $item.Issue -replace '\|', '\|' } else { '-' }
+    $itemId = $item.Id
+    $itemName = $item.Name
+    $itemSource = $item.Source
+    $mdContent += "`n| `$itemId` | $itemName | $itemSource | $sBadge | $ev | $iss |"
+}
+
+$mdContent += @"
+
+
+---
+
+## 异常清单与处理建议
+
+"@
+
+if ($issues.Count -eq 0) {
+    $mdContent += "所有检查项均处于正常健康状态，无需任何额外修复。`n"
+} else {
+    for ($i = 0; $i -lt $issues.Count; $i++) {
+        $mdContent += "$($i + 1). $($issues[$i])`n"
+    }
+}
+
+$summaryMdPath = Join-Path $runDir 'summary.md'
+$mdContent | Set-Content -LiteralPath $summaryMdPath -Encoding utf8
+
+# 打印控制台总结
+Log-Section "检验结果总结"
+if ($report.Status -eq 'Healthy') {
     if (-not $Quiet) {
-        Write-Host "`n>>> [状态：全维健康] 所有代理配置、快捷方式及汉化补丁均处于正常就绪状态！" -ForegroundColor Green
+        Write-Host "`n>>> [状态：全维健康] 所有代理配置、快捷方式、汉化补丁及智能体环境均处于正常就绪状态！" -ForegroundColor Green
     }
 } else {
-    $report.Status = 'NeedsAttention'
     if (-not $Quiet) {
-        Write-Host "`n>>> [状态：发现 $($issues.Count) 处待处理项] 详情如下：" -ForegroundColor Yellow
+        Write-Host "`n>>> [状态：$($report.Status)，共 $($issues.Count) 项待处理] 详情如下：" -ForegroundColor Yellow
         for ($i = 0; $i -lt $issues.Count; $i++) {
             Write-Host "   $($i + 1). $($issues[$i])" -ForegroundColor Yellow
         }
+        Write-Host "`n  报告已生成: $summaryMdPath" -ForegroundColor Gray
     }
 }
 

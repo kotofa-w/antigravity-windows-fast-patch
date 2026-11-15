@@ -1,5 +1,33 @@
 # 重要历史
 
+## 2026-11-15 统一环境维护系统集成、开源发行架构与动态 Agent 协作支持
+
+响应用户开发任务书及补充需求，完成统一环境维护系统深度开发与开源通用化升级：
+
+1. **环境自适应发现引擎 (EnvironmentDiscovery)**：
+   - 编写 `tools/EnvironmentDiscovery.ps1`，彻底解除此前绑定开发者个人电脑路径（`C:\Users\123\...`）的历史限制；
+   - 动态识别 Windows 版本、系统架构、用户 Profile 目录、快捷方式位置、运行态进程、注册表卸载项、Node.js/Git 运行时依赖及 Antigravity 实际安装路径（当前基线 2.32.1 / 44.9.1），输出标准化 `outputs/environment.json`，为全开源分发与跨机全新部署奠定自适应基础。
+2. **统一检查协议与持久化诊断体系**：
+   - 重构 `tools/Check-Antigravity.ps1`，引入工业级统一检查协议（包含 `CORE-BIN`, `PROXY`, `SHORTCUT`, `ASAR`, `RUNTIME`, `AGENT`, `SKILL` 共 17 个细分项检查点）；
+   - 输出统一结构化报告到 `outputs/health-runs/<run-id>/summary.json`、Markdown 格式 `summary.md` 以及软链 `outputs/latest-run.json`，支持 `pass`/`warning`/`fail`/`skipped`/`unknown` 及 `repair_status` 精准状态追踪。
+3. **动态 Agent 任务提示词生成器 (Export-AgentPrompt)**：
+   - 编写 `tools/Export-AgentPrompt.ps1` 与模板 `templates/agent-prompt.md`，从最近诊断或环境事实中提取异常项、已执行操作、核心防篡改准则与排查指令；
+   - 输出标准化 `agent-prompt.md`，集成基于 Windows Forms / PowerShell 纯托管剪贴板复制能力，支持用户一键复制提示词并在任意 AI 助手（Antigravity、Codex 等）中无缝接管排查。
+4. **Agent Skill 规范升级与自动安装部署 (Install-AgentSkill)**：
+   - 编写 `tools/Install-AgentSkill.ps1`，自动向 Antigravity 全局技能库（`~/.gemini/config/skills/antigravity-windows-fast-patch`）注册 Junction 链接或同步副本；
+   - 全面升级 `SKILL.md`，提供纯相对路径与自适应发现规范，定义健康体检、闭环修复与提示词协同 3 大标准工作流。
+5. **统一交互调度主控与命令行模式**：
+   - 重构 `Check-And-Fix-Antigravity.ps1` 与 `一键检验与修复.bat`，构建 6 大交互菜单选项（一键体检修复、仅体检、生成提示词、安装技能、查看报告、回滚及退出）；
+   - 支持失败时自动触发“复制提示词/打开提示词”的 Agent 移交分支；
+   - 支持全静默命令行参数（`-CheckOnly`, `-Fix`, `-ExportPrompt`, `-InstallSkill`, `-FullMaintenance`, `-Rollback`）。
+6. **开源合规与第三方溯源**：
+   - 溯源并记录代理注入组件来自开源上游 `https://github.com/yuaotian/antigravity-proxy`（v2.4）；
+   - 更新中英文双语开源文档 `README.md` 与 `README.en.md`，明确官方核心程序与第三方社区补丁边界，申明受保护二进制防篡改安全红线。
+7. **全维实测验证通过**：
+   - 在真实 Antigravity 2.32.1 运行环境下实测 17 项统一检查点全部 PASS，各模式均闭环验证通过。
+
+---
+
 ## 2026-11-15 对照原技能仓库完成全套技能架构复刻
 
 用户提供原项目仓库 `https://github.com/chen0416ccc-cpu/codex-windows-fast-patch-skill`，要求继续未完成部分。

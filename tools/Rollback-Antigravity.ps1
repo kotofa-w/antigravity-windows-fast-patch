@@ -7,7 +7,7 @@
 
 [CmdletBinding()]
 param (
-    [string]$AppDir = 'C:\Users\123\AppData\Local\Programs\antigravity',
+    [string]$AppDir = '',
     [string]$BackupDir,
     [switch]$RemoveProxy,
     [switch]$CloseRunningProcess,
@@ -17,6 +17,17 @@ param (
 $ErrorActionPreference = 'Stop'
 $toolsDir = $PSScriptRoot
 $toolkitDir = Split-Path $toolsDir -Parent
+$discoveryScript = Join-Path $toolsDir 'EnvironmentDiscovery.ps1'
+
+if (-not $AppDir) {
+    try {
+        $envData = & $discoveryScript
+        $AppDir = $envData.Antigravity.AppDir
+    } catch {
+        $userProfile = [System.Environment]::GetFolderPath('UserProfile')
+        $AppDir = Join-Path $userProfile 'AppData\Local\Programs\antigravity'
+    }
+}
 
 function Get-FileSha256([string]$filePath) {
     if (-not (Test-Path -LiteralPath $filePath)) { return $null }
