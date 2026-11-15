@@ -1,0 +1,19 @@
+﻿{
+    "originalAsar":  "03F3D09472C08A6225A6C2625D28839781C8E6596B8B6F57FF7FF5D575BDBBB4",
+    "shortcuts":  [
+                      {
+                          "path":  "C:\\Users\\123\\Desktop\\Antigravity.lnk",
+                          "arguments":  "\"C:\\Users\\123\\AppData\\Local\\Programs\\antigravity\\launch-antigravity-65532.vbs\"",
+                          "target":  "C:\\Windows\\System32\\wscript.exe"
+                      },
+                      {
+                          "path":  "C:\\Users\\123\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Antigravity.lnk",
+                          "arguments":  "",
+                          "target":  "C:\\Users\\123\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe"
+                      }
+                  ],
+    "protected":  {
+                      "resources\\bin\\language_server.exe":  "77B76711786BD78B51A6879FA57E66F9F5D398AC5D369CF8B5B3E2FB5CFC741B",
+                      "Antigravity.exe":  "9F26F3863C47B3C6E0E1BBC1A0936C54E484C5A6A2C01823C358390C526E6C9F"
+                  }
+}

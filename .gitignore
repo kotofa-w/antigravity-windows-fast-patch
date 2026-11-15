@@ -1,0 +1,14 @@
+# 临时文件与日志
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# 动态生成的中间件与临时备份
+backups/
+outputs/**/backup-202*
+outputs/backup-202*
+
+# Node 依赖与临时文件
+payload/localization/node_modules/.cache/

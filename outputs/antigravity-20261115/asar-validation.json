@@ -1,0 +1,17 @@
+{
+  "version": "2.32.1",
+  "changed": [
+    "dist\\ideInstall\\wizardHtml.js",
+    "dist\\ipcHandlers.js",
+    "dist\\main.js",
+    "dist\\menu.js",
+    "dist\\preload.js",
+    "dist\\tray.js",
+    "dist\\updater.js",
+    "dist\\wsl.js"
+  ],
+  "syntax": "passed",
+  "resourceLayout": "preserved",
+  "entries": 1208,
+  "external": 347
+}

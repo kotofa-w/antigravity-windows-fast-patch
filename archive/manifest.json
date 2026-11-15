@@ -1,0 +1,34 @@
+{
+  "name": "antigravity-patch-toolkit",
+  "version": "1.0.0",
+  "created": "2026-11-15T20:29:00+08:00",
+  "description": "Antigravity 自包含一键检验、修复与汉化还原工具套件",
+  "components": {
+    "entrypoints": [
+      "一键检验与修复.bat",
+      "Check-And-Fix-Antigravity.ps1"
+    ],
+    "tools": [
+      "tools/Check-Antigravity.ps1",
+      "tools/Fix-Antigravity.ps1",
+      "tools/Rollback-Antigravity.ps1",
+      "tools/patch-asar.cjs"
+    ],
+    "payload": {
+      "proxy": {
+        "version": "2.4",
+        "port": 65532,
+        "files": {
+          "version.dll": "40F037232A180DA8DFF7611021270549FCC4E208580D8BF0F70BC9975F871B5F",
+          "config.json": "03A2143D0152C1D1C94F5B06E8F11E56130BC474A62118957EE9944FF441C004",
+          "launch-antigravity-65532.vbs": "06BADDF9589183B4EBE6EEF6F9E81706E7F7A2CC020DE06709BE4CB5925AEBFE"
+        }
+      },
+      "localization": {
+        "upstream": "yiheng8023/antigravity-chinese 3.3.21",
+        "hasOfflineDependencies": true,
+        "asarEngine": "@electron/asar"
+      }
+    }
+  }
+}
