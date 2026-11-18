@@ -15,7 +15,8 @@ param (
     [string]$ExpectedProxyHost = '127.0.0.1',
     [int]$ExpectedProxyPort = 65532,
     [string]$RunId = '',
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$ForLaunch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,7 @@ $nodeScript = Join-Path $toolsDir 'patch-asar.cjs'
 $discoveryScript = Join-Path $toolsDir 'EnvironmentDiscovery.ps1'
 
 # 1. 动态加载环境探测事实
-$envData = & $discoveryScript -AppDir $AppDir -PreferredProxyPort $ExpectedProxyPort
+$envData = & $discoveryScript -AppDir $AppDir -PreferredProxyPort $ExpectedProxyPort -NoCache:$ForLaunch
 if (-not $AppDir) {
     $AppDir = $envData.Antigravity.AppDir
 }
@@ -132,15 +133,21 @@ $mainExeExists = Test-Path -LiteralPath $mainExe
 $langExeExists = Test-Path -LiteralPath $langExe
 
 if ($mainExeExists) {
-    $mainHash = (Get-FileHash -LiteralPath $mainExe -Algorithm SHA256).Hash
-    Add-CheckItem -Id "CORE-BIN-02" -Name "主程序 (Antigravity.exe)" -Source "external" -Status "pass" -Evidence "完整且受保护 (SHA256: $mainHash)"
+    $mainEvidence = if ($ForLaunch) { "存在: $mainExe" } else {
+        $mainHash = (Get-FileHash -LiteralPath $mainExe -Algorithm SHA256).Hash
+        "完整且受保护 (SHA256: $mainHash)"
+    }
+    Add-CheckItem -Id "CORE-BIN-02" -Name "主程序 (Antigravity.exe)" -Source "external" -Status "pass" -Evidence $mainEvidence
 } else {
     Add-CheckItem -Id "CORE-BIN-02" -Name "主程序 (Antigravity.exe)" -Source "external" -Status "fail" -Evidence "文件缺失: $mainExe" -Issue "主程序核心二进制缺失" -RepairStatus "manual_required"
 }
 
 if ($langExeExists) {
-    $langHash = (Get-FileHash -LiteralPath $langExe -Algorithm SHA256).Hash
-    Add-CheckItem -Id "CORE-BIN-03" -Name "语言服务器 (language_server.exe)" -Source "external" -Status "pass" -Evidence "存在 (SHA256: $langHash)"
+    $langEvidence = if ($ForLaunch) { "存在: $langExe" } else {
+        $langHash = (Get-FileHash -LiteralPath $langExe -Algorithm SHA256).Hash
+        "存在 (SHA256: $langHash)"
+    }
+    Add-CheckItem -Id "CORE-BIN-03" -Name "语言服务器 (language_server.exe)" -Source "external" -Status "pass" -Evidence $langEvidence
 } else {
     Add-CheckItem -Id "CORE-BIN-03" -Name "语言服务器 (language_server.exe)" -Source "external" -Status "fail" -Evidence "文件缺失: $langExe" -Issue "语言服务器核心程序缺失" -RepairStatus "manual_required"
 }
@@ -206,37 +213,39 @@ if (Test-Path -LiteralPath $vbsPath) {
 }
 
 # 3. 检查快捷方式
-Log-Section "3. 桌面与开始菜单快捷方式检查"
-$desktopLnk = $envData.Shortcuts.Desktop
-$startMenuLnk = $envData.Shortcuts.StartMenu
-$shortcuts = @(
-    @{ Id = 'SHORTCUT-01'; Name = '桌面快捷方式'; Path = $desktopLnk },
-    @{ Id = 'SHORTCUT-02'; Name = '开始菜单快捷方式'; Path = $startMenuLnk }
-)
-$wsh = New-Object -ComObject WScript.Shell
-foreach ($s in $shortcuts) {
-    $sId = $s.Id
-    $sName = $s.Name
-    $sPath = $s.Path
-    if (Test-Path -LiteralPath $sPath) {
-        $lnk = $wsh.CreateShortcut($sPath)
-        $targetOk = ($lnk.TargetPath -like '*\wscript.exe')
-        $argsOk = ($lnk.Arguments -like "*launch-antigravity-$ExpectedProxyPort.vbs*")
-        $shortcutOk = ($targetOk -and $argsOk)
-        $report.Shortcuts[$sId] = @{
-            Exists = $true
-            TargetPath = $lnk.TargetPath
-            Arguments = $lnk.Arguments
-            Valid = $shortcutOk
-        }
-        if ($shortcutOk) {
-            Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "pass" -Evidence "指向 VBS 启动器 (Target: $($lnk.TargetPath))"
+if (-not $ForLaunch) {
+    Log-Section "3. 桌面与开始菜单快捷方式检查"
+    $desktopLnk = $envData.Shortcuts.Desktop
+    $startMenuLnk = $envData.Shortcuts.StartMenu
+    $shortcuts = @(
+        @{ Id = 'SHORTCUT-01'; Name = '桌面快捷方式'; Path = $desktopLnk },
+        @{ Id = 'SHORTCUT-02'; Name = '开始菜单快捷方式'; Path = $startMenuLnk }
+    )
+    $wsh = New-Object -ComObject WScript.Shell
+    foreach ($s in $shortcuts) {
+        $sId = $s.Id
+        $sName = $s.Name
+        $sPath = $s.Path
+        if (Test-Path -LiteralPath $sPath) {
+            $lnk = $wsh.CreateShortcut($sPath)
+            $targetOk = ($lnk.TargetPath -like '*\wscript.exe')
+            $argsOk = ($lnk.Arguments -like "*launch-antigravity-$ExpectedProxyPort.vbs*")
+            $shortcutOk = ($targetOk -and $argsOk)
+            $report.Shortcuts[$sId] = @{
+                Exists = $true
+                TargetPath = $lnk.TargetPath
+                Arguments = $lnk.Arguments
+                Valid = $shortcutOk
+            }
+            if ($shortcutOk) {
+                Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "pass" -Evidence "指向 VBS 启动器 (Target: $($lnk.TargetPath))"
+            } else {
+                Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "fail" -Evidence "Target: $($lnk.TargetPath) | Args: $($lnk.Arguments)" -Issue "快捷方式未指向代理启动器脚本" -RepairStatus "fixed"
+            }
         } else {
-            Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "fail" -Evidence "Target: $($lnk.TargetPath) | Args: $($lnk.Arguments)" -Issue "快捷方式未指向代理启动器脚本" -RepairStatus "fixed"
+            $report.Shortcuts[$sId] = @{ Exists = $false; Valid = $false }
+            Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "warning" -Evidence "快捷方式未找到: $sPath" -Issue "快捷方式文件不存在" -RepairStatus "fixed"
         }
-    } else {
-        $report.Shortcuts[$sId] = @{ Exists = $false; Valid = $false }
-        Add-CheckItem -Id $sId -Name $sName -Source "external" -Status "warning" -Evidence "快捷方式未找到: $sPath" -Issue "快捷方式文件不存在" -RepairStatus "fixed"
     }
 }
 
@@ -279,6 +288,15 @@ $report.Localization = @{
     Version = $report.Version
     IsPatched = [bool]($asarCheck -and $asarCheck.isPatched)
     UnpackedExists = $unpackedExists
+}
+
+if ($ForLaunch) {
+    return [PSCustomObject]@{
+        Ready = @($checkItems | Where-Object Status -NE 'pass').Count -eq 0
+        AppDir = $AppDir
+        Launcher = $vbsPath
+        Items = $checkItems.ToArray()
+    }
 }
 
 # 5. 检查运行态与 TCP 连接

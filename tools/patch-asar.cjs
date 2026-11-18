@@ -51,12 +51,7 @@ async function checkAsar(asar, asarPath) {
   let isPatched = false;
   try {
     const preload = asar.extractFile(asarPath, 'dist/preload.js').toString('utf8');
-    if (preload.includes('Antigravity Chinese Localization') ||
-        preload.includes('zh-CN') ||
-        preload.includes('语言') ||
-        preload.includes('i18n')) {
-      isPatched = true;
-    }
+    isPatched = preload.includes('Antigravity Chinese Localization Injection Start');
   } catch (_) {}
 
   return {

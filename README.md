@@ -44,6 +44,16 @@
 
 ## 使用方法
 
+### 桌面检查启动
+
+新建一个独立命名的桌面快捷方式，例如「Antigravity - 检查启动」，将目标设为以下命令。把脚本路径替换为你的项目绝对路径。
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\path\to\project\tools\Start-Antigravity.ps1"
+```
+
+每次双击会检查代理和汉化补丁。通过时启动 Antigravity，发现异常时打开修复菜单。将项目保存在官方安装目录之外，以便应用更新后继续使用这个快捷方式。
+
 ### 1. 双击一键使用 (交互式主控)
 
 直接双击运行根目录下的 **`一键检验与修复.bat`**，进入统一交互控制台：

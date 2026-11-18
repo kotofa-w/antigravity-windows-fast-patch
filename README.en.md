@@ -44,6 +44,16 @@ It features automatic environment discovery, unified health check protocols, sna
 
 ## Usage
 
+### Desktop launch with a patch check
+
+Create a desktop shortcut with a distinct name, such as “Antigravity - Check and Launch”. Set its target to the command below and replace the script path with the absolute path to your checkout.
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\path\to\project\tools\Start-Antigravity.ps1"
+```
+
+The shortcut checks the proxy and localization patches on each launch. A passing check starts Antigravity. An issue opens the repair menu. Keep the checkout outside the official application directory so the shortcut remains usable after an update.
+
 ### 1. Interactive Double-Click Launcher
 
 Double-click **`一键检验与修复.bat`** in the project root to open the interactive menu:

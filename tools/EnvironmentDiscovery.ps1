@@ -234,10 +234,12 @@ function Get-AntigravityEnvironment {
 # 导出并保存到 outputs/environment.json
 $envData = Get-AntigravityEnvironment -CustomAppDir $AppDir -ProxyPort $PreferredProxyPort
 
-if (-not (Test-Path -LiteralPath $outputDir)) {
-    New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+if (-not $NoCache) {
+    if (-not (Test-Path -LiteralPath $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
+    $envJsonPath = Join-Path $outputDir 'environment.json'
+    $envData | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $envJsonPath -Encoding utf8
 }
-$envJsonPath = Join-Path $outputDir 'environment.json'
-$envData | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $envJsonPath -Encoding utf8
 
 return $envData
